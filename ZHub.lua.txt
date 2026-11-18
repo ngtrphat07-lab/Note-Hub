@@ -1,0 +1,1119 @@
+--[[
+    ╔══════════════════════════════════════════════════════════════╗
+    ║                          Z HUB                                ║
+    ║              Full-Featured Roblox Script Hub                  ║
+    ║                                                               ║
+    ║  Tabs:  Player | Visuals | Teleport | Misc | Settings         ║
+    ║  UI:    Self-built, no external dependencies                  ║
+    ║  Load:  loadstring(game:HttpGet("URL"))()                     ║
+    ╚══════════════════════════════════════════════════════════════╝
+]]
+
+-- ============================================================
+-- SERVICES
+-- ============================================================
+local Players           = game:GetService("Players")
+local LocalPlayer       = Players.LocalPlayer
+local UserInputService  = game:GetService("UserInputService")
+local RunService         = game:GetService("RunService")
+local Workspace          = game:GetService("Workspace")
+local Lighting           = game:GetService("Lighting")
+local CoreGui            = game:GetService("CoreGui")
+local TeleportService    = game:GetService("TeleportService")
+local HttpService        = game:GetService("HttpService")
+local TweenService       = game:GetService("TweenService")
+local Stats              = game:GetService("Stats")
+local VirtualUser        = game:GetService("VirtualUser")
+
+-- ============================================================
+-- STATE
+-- ============================================================
+local ZHub = {
+    Flags       = {},        -- lưu trạng thái toggle / slider
+    Connections = {},        -- giữ RBXConnection để ngắt khi unload
+    Instances   = {},        -- giữ Instance để Destroy khi unload
+    Theme = {
+        Background   = Color3.fromRGB(20, 20, 28),
+        Sidebar      = Color3.fromRGB(28, 28, 38),
+        Accent       = Color3.fromRGB(120, 80, 230),
+        AccentHover  = Color3.fromRGB(140, 100, 250),
+        Text         = Color3.fromRGB(235, 235, 245),
+        SubText      = Color3.fromRGB(150, 150, 165),
+        Element      = Color3.fromRGB(38, 38, 50),
+        ElementHover = Color3.fromRGB(48, 48, 62),
+        Stroke       = Color3.fromRGB(60, 60, 80),
+        Good         = Color3.fromRGB(80, 220, 120),
+        Bad          = Color3.fromRGB(230, 90, 90),
+    },
+}
+
+-- ============================================================
+-- HELPERS
+-- ============================================================
+local function track(instance)
+    table.insert(ZHub.Instances, instance)
+    return instance
+end
+
+local function connect(signal, callback)
+    local c = signal:Connect(callback)
+    table.insert(ZHub.Connections, c)
+    return c
+end
+
+local function notify(title, text, duration)
+    duration = duration or 3
+    local sg = track(Instance.new("ScreenGui"))
+    sg.Name = "ZHubNotify_" .. tostring(math.random(1e6))
+    sg.Parent = CoreGui
+    sg.ResetOnSpawn = false
+
+    local holder = track(Instance.new("Frame"))
+    holder.Size = UDim2.new(0, 280, 0, 70)
+    holder.Position = UDim2.new(1, -310, 1, -90)
+    holder.BackgroundColor3 = ZHub.Theme.Background
+    holder.BackgroundTransparency = 0
+    holder.Parent = sg
+
+    local corner = track(Instance.new("UICorner"))
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = holder
+
+    local stroke = track(Instance.new("UIStroke"))
+    stroke.Color = ZHub.Theme.Accent
+    stroke.Thickness = 1.5
+    stroke.Parent = holder
+
+    local bar = track(Instance.new("Frame"))
+    bar.Size = UDim2.new(1, 0, 0, 3)
+    bar.Position = UDim2.new(0, 0, 1, -3)
+    bar.BackgroundColor3 = ZHub.Theme.Accent
+    bar.Parent = holder
+
+    local t = track(Instance.new("TextLabel"))
+    t.Size = UDim2.new(1, -16, 0, 22)
+    t.Position = UDim2.new(0, 12, 0, 8)
+    t.BackgroundTransparency = 1
+    t.Font = Enum.Font.GothamBold
+    t.TextSize = 14
+    t.TextColor3 = ZHub.Theme.Text
+    t.TextXAlignment = Enum.TextXAlignment.Left
+    t.Text = title
+    t.Parent = holder
+
+    local d = track(Instance.new("TextLabel"))
+    d.Size = UDim2.new(1, -16, 0, 32)
+    d.Position = UDim2.new(0, 12, 0, 30)
+    d.BackgroundTransparency = 1
+    d.Font = Enum.Font.Gotham
+    d.TextSize = 12
+    d.TextColor3 = ZHub.Theme.SubText
+    d.TextXAlignment = Enum.TextXAlignment.Left
+    d.TextWrapped = true
+    d.Text = text
+    d.Parent = holder
+
+    holder.Position = UDim2.new(1, 0, 1, -90)
+    TweenService:Create(holder, TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+        {Position = UDim2.new(1, -310, 1, -90)}):Play()
+
+    local tween = TweenService:Create(bar, TweenInfo.new(duration, Enum.EasingStyle.Linear),
+        {Size = UDim2.new(0, 0, 0, 3)})
+    tween:Play()
+
+    task.delay(duration + 0.4, function()
+        if sg then
+            TweenService:Create(holder, TweenInfo.new(0.25), {Position = UDim2.new(1, 0, 1, -90)}):Play()
+            task.wait(0.3)
+            sg:Destroy()
+        end
+    end)
+end
+
+-- ============================================================
+-- UI LIBRARY (tự xây dựng)
+-- ============================================================
+local UILib = {}
+UILib.__index = UILib
+
+function UILib.new(title)
+    local self = setmetatable({}, UILib)
+
+    local sg = track(Instance.new("ScreenGui"))
+    sg.Name = "ZHub_" .. tostring(math.random(1e6))
+    sg.Parent = CoreGui
+    sg.ResetOnSpawn = false
+    sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    self.gui = sg
+
+    -- Main window
+    local main = track(Instance.new("Frame"))
+    main.Name = "Main"
+    main.Size = UDim2.new(0, 560, 0, 360)
+    main.Position = UDim2.new(0.5, -280, 0.5, -180)
+    main.BackgroundColor3 = ZHub.Theme.Background
+    main.BorderSizePixel = 0
+    main.Parent = sg
+    self.main = main
+
+    local corner = track(Instance.new("UICorner"))
+    corner.CornerRadius = UDim.new(0, 10)
+    corner.Parent = main
+
+    local stroke = track(Instance.new("UIStroke"))
+    stroke.Color = ZHub.Theme.Stroke
+    stroke.Thickness = 1
+    stroke.Parent = main
+
+    -- Top bar
+    local topBar = track(Instance.new("Frame"))
+    topBar.Name = "TopBar"
+    topBar.Size = UDim2.new(1, 0, 0, 38)
+    topBar.BackgroundColor3 = ZHub.Theme.Sidebar
+    topBar.BorderSizePixel = 0
+    topBar.Parent = main
+
+    local topCorner = track(Instance.new("UICorner"))
+    topCorner.CornerRadius = UDim.new(0, 10)
+    topCorner.Parent = topBar
+
+    local cover = track(Instance.new("Frame"))
+    cover.Size = UDim2.new(1, 0, 0, 10)
+    cover.Position = UDim2.new(0, 0, 1, -10)
+    cover.BackgroundColor3 = ZHub.Theme.Sidebar
+    cover.BorderSizePixel = 0
+    cover.Parent = topBar
+
+    local logo = track(Instance.new("TextLabel"))
+    logo.Size = UDim2.new(0, 200, 1, 0)
+    logo.Position = UDim2.new(0, 14, 0, 0)
+    logo.BackgroundTransparency = 1
+    logo.Font = Enum.Font.GothamBold
+    logo.TextSize = 16
+    logo.TextColor3 = ZHub.Theme.Text
+    logo.TextXAlignment = Enum.TextXAlignment.Left
+    logo.Text = "  " .. title
+    logo.Parent = topBar
+
+    local accentDot = track(Instance.new("Frame"))
+    accentDot.Size = UDim2.new(0, 10, 0, 10)
+    accentDot.Position = UDim2.new(0, 8, 0.5, -5)
+    accentDot.BackgroundColor3 = ZHub.Theme.Accent
+    accentDot.BorderSizePixel = 0
+    accentDot.Parent = topBar
+    local dC = track(Instance.new("UICorner"))
+    dC.CornerRadius = UDim.new(1, 0)
+    dC.Parent = accentDot
+
+    -- Draggable
+    local dragging, dragStart, startPos
+    connect(UserInputService.InputBegan, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 and
+           UserInputService:GetMouseLocation().Y < main.AbsolutePosition.Y + 38 then
+            dragging = true
+            dragStart = input.Position
+            startPos = main.Position
+        end
+    end)
+    connect(UserInputService.InputChanged, function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - dragStart
+            main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
+                                      startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    connect(UserInputService.InputEnded, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+
+    -- Sidebar
+    local sidebar = track(Instance.new("Frame"))
+    sidebar.Name = "Sidebar"
+    sidebar.Size = UDim2.new(0, 140, 1, -38)
+    sidebar.Position = UDim2.new(0, 0, 0, 38)
+    sidebar.BackgroundColor3 = ZHub.Theme.Sidebar
+    sidebar.BorderSizePixel = 0
+    sidebar.Parent = main
+
+    local sbList = track(Instance.new("UIListLayout"))
+    sbList.Parent = sidebar
+    sbList.Padding = UDim.new(0, 2)
+    sbList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    sbList.SortOrder = Enum.SortOrder.LayoutOrder
+
+    local sbPad = track(Instance.new("UIPadding"))
+    sbPad.Parent = sidebar
+    sbPad.PaddingTop = UDim.new(0, 10)
+
+    -- Content area (chứa các page)
+    local content = track(Instance.new("Frame"))
+    content.Name = "Content"
+    content.Size = UDim2.new(1, -150, 1, -48)
+    content.Position = UDim2.new(0, 148, 0, 44)
+    content.BackgroundColor3 = ZHub.Theme.Background
+    content.BorderSizePixel = 0
+    content.Parent = main
+
+    local cc = track(Instance.new("UICorner"))
+    cc.CornerRadius = UDim.new(0, 6)
+    cc.Parent = content
+
+    self.sidebar = sidebar
+    self.content = content
+    self.tabs = {}
+    self.pages = {}
+    self.currentTab = nil
+
+    -- Resize hint (bottom-right)
+    local footer = track(Instance.new("TextLabel"))
+    footer.Size = UDim2.new(1, 0, 0, 18)
+    footer.Position = UDim2.new(0, 0, 1, -18)
+    footer.BackgroundTransparency = 1
+    footer.Font = Enum.Font.Gotham
+    footer.TextSize = 11
+    footer.TextColor3 = ZHub.Theme.SubText
+    footer.TextXAlignment = Enum.TextXAlignment.Center
+    footer.Text = "Z Hub v1.0  •  Press " .. tostring(ZHub.Flags.UIKey or "RightShift") .. " to toggle UI"
+    footer.Parent = main
+    self.footer = footer
+
+    return self
+end
+
+function UILib:AddTab(name, icon)
+    local btn = track(Instance.new("TextButton"))
+    btn.Size = UDim2.new(0, 128, 0, 32)
+    btn.BackgroundColor3 = ZHub.Theme.Element
+    btn.BackgroundTransparency = 0
+    btn.Text = "  " .. name
+    btn.Font = Enum.Font.GothamSemibold
+    btn.TextSize = 13
+    btn.TextColor3 = ZHub.Theme.SubText
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.AutoButtonColor = false
+    btn.Parent = self.sidebar
+    local bc = track(Instance.new("UICorner"))
+    bc.CornerRadius = UDim.new(0, 6)
+    bc.Parent = btn
+
+    local page = track(Instance.new("ScrollingFrame"))
+    page.Size = UDim2.new(1, -16, 1, -16)
+    page.Position = UDim2.new(0, 8, 0, 8)
+    page.BackgroundTransparency = 1
+    page.BorderSizePixel = 0
+    page.ScrollBarThickness = 3
+    page.ScrollBarImageColor3 = ZHub.Theme.Accent
+    page.CanvasSize = UDim2.new(0, 0, 0, 0)
+    page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    page.Visible = false
+    page.Parent = self.content
+
+    local list = track(Instance.new("UIListLayout"))
+    list.Parent = page
+    list.Padding = UDim.new(0, 6)
+    list.SortOrder = Enum.SortOrder.LayoutOrder
+
+    local tab = {button = btn, page = page, name = name}
+    table.insert(self.tabs, tab)
+
+    local function select()
+        for _, t in ipairs(self.tabs) do
+            t.page.Visible = false
+            t.button.BackgroundColor3 = ZHub.Theme.Element
+            t.button.TextColor3 = ZHub.Theme.SubText
+        end
+        page.Visible = true
+        btn.BackgroundColor3 = ZHub.Theme.Accent
+        btn.TextColor3 = ZHub.Theme.Text
+        self.currentTab = tab
+    end
+
+    btn.MouseButton1Click:Connect(select)
+    if #self.tabs == 1 then select() end
+    return tab
+end
+
+-- Element: Section title
+local function makeSectionLabel(page, text)
+    local lbl = track(Instance.new("TextLabel"))
+    lbl.Size = UDim2.new(1, 0, 0, 18)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 12
+    lbl.TextColor3 = ZHub.Theme.Accent
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Text = "  " .. string.upper(text)
+    lbl.Parent = page
+end
+
+-- Element: Toggle
+local function makeToggle(page, text, default, callback)
+    local flag = text
+    ZHub.Flags[flag] = default and true or false
+
+    local btn = track(Instance.new("TextButton"))
+    btn.Size = UDim2.new(1, 0, 0, 34)
+    btn.BackgroundColor3 = ZHub.Theme.Element
+    btn.AutoButtonColor = false
+    btn.Text = ""
+    btn.Parent = page
+    local bc = track(Instance.new("UICorner"))
+    bc.CornerRadius = UDim.new(0, 6)
+    bc.Parent = btn
+
+    local lbl = track(Instance.new("TextLabel"))
+    lbl.Size = UDim2.new(1, -52, 1, 0)
+    lbl.Position = UDim2.new(0, 12, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextSize = 13
+    lbl.TextColor3 = ZHub.Theme.Text
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Text = text
+    lbl.Parent = btn
+
+    local sw = track(Instance.new("Frame"))
+    sw.Size = UDim2.new(0, 32, 0, 16)
+    sw.Position = UDim2.new(1, -40, 0.5, -8)
+    sw.BackgroundColor3 = ZHub.Theme.Stroke
+    sw.BorderSizePixel = 0
+    sw.Parent = btn
+    local swC = track(Instance.new("UICorner"))
+    swC.CornerRadius = UDim.new(1, 0)
+    swC.Parent = sw
+
+    local dot = track(Instance.new("Frame"))
+    dot.Size = UDim2.new(0, 12, 0, 12)
+    dot.Position = UDim2.new(0, 2, 0.5, -6)
+    dot.BackgroundColor3 = ZHub.Theme.Text
+    dot.BorderSizePixel = 0
+    dot.Parent = sw
+    local dC = track(Instance.new("UICorner"))
+    dC.CornerRadius = UDim.new(1, 0)
+    dC.Parent = dot
+
+    local state = default and true or false
+    local function update()
+        if state then
+            sw.BackgroundColor3 = ZHub.Theme.Accent
+            dot.Position = UDim2.new(1, -14, 0.5, -6)
+        else
+            sw.BackgroundColor3 = ZHub.Theme.Stroke
+            dot.Position = UDim2.new(0, 2, 0.5, -6)
+        end
+        ZHub.Flags[flag] = state
+        if callback then callback(state) end
+    end
+    if default then update() end
+
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        update()
+    end)
+
+    return {
+        Set = function(v) state = v and true or false; update() end,
+        Get = function() return state end,
+    }
+end
+
+-- Element: Slider
+local function makeSlider(page, text, minVal, maxVal, default, callback)
+    local flag = text
+    ZHub.Flags[flag] = default
+
+    local holder = track(Instance.new("Frame"))
+    holder.Size = UDim2.new(1, 0, 0, 44)
+    holder.BackgroundColor3 = ZHub.Theme.Element
+    holder.BorderSizePixel = 0
+    holder.Parent = page
+    local hc = track(Instance.new("UICorner"))
+    hc.CornerRadius = UDim.new(0, 6)
+    hc.Parent = holder
+
+    local lbl = track(Instance.new("TextLabel"))
+    lbl.Size = UDim2.new(0.6, 0, 0, 20)
+    lbl.Position = UDim2.new(0, 12, 0, 6)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextSize = 13
+    lbl.TextColor3 = ZHub.Theme.Text
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Text = text
+    lbl.Parent = holder
+
+    local val = track(Instance.new("TextLabel"))
+    val.Size = UDim2.new(0.4, -16, 0, 20)
+    val.Position = UDim2.new(0.6, 0, 0, 6)
+    val.BackgroundTransparency = 1
+    val.Font = Enum.Font.GothamBold
+    val.TextSize = 13
+    val.TextColor3 = ZHub.Theme.Accent
+    val.TextXAlignment = Enum.TextXAlignment.Right
+    val.Text = tostring(default)
+    val.Parent = holder
+
+    local track_ = track(Instance.new("Frame"))
+    track_.Size = UDim2.new(1, -24, 0, 6)
+    track_.Position = UDim2.new(0, 12, 0, 30)
+    track_.BackgroundColor3 = ZHub.Theme.Stroke
+    track_.BorderSizePixel = 0
+    track_.Parent = holder
+    local tC = track(Instance.new("UICorner"))
+    tC.CornerRadius = UDim.new(1, 0)
+    tC.Parent = track_
+
+    local fill = track(Instance.new("Frame"))
+    fill.Size = UDim2.new((default - minVal) / (maxVal - minVal), 0, 1, 0)
+    fill.BackgroundColor3 = ZHub.Theme.Accent
+    fill.BorderSizePixel = 0
+    fill.Parent = track_
+    local fC = track(Instance.new("UICorner"))
+    fC.CornerRadius = UDim.new(1, 0)
+    fC.Parent = fill
+
+    local dragging = false
+    local function setFromX(x)
+        local rel = math.clamp((x - track_.AbsolutePosition.X) / track_.AbsoluteSize.X, 0, 1)
+        local v = math.floor(minVal + (maxVal - minVal) * rel + 0.5)
+        fill.Size = UDim2.new(rel, 0, 1, 0)
+        val.Text = tostring(v)
+        ZHub.Flags[flag] = v
+        if callback then callback(v) end
+    end
+
+    track_.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            setFromX(UserInputService:GetMouseLocation().X)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            setFromX(input.Position.X)
+        end
+    end)
+
+    return {
+        Set = function(v)
+            v = math.clamp(v, minVal, maxVal)
+            local rel = (v - minVal) / (maxVal - minVal)
+            fill.Size = UDim2.new(rel, 0, 1, 0)
+            val.Text = tostring(v)
+            ZHub.Flags[flag] = v
+            if callback then callback(v) end
+        end,
+        Get = function() return ZHub.Flags[flag] end,
+    }
+end
+
+-- Element: Button
+local function makeButton(page, text, callback)
+    local btn = track(Instance.new("TextButton"))
+    btn.Size = UDim2.new(1, 0, 0, 32)
+    btn.BackgroundColor3 = ZHub.Theme.Element
+    btn.AutoButtonColor = false
+    btn.Font = Enum.Font.GothamSemibold
+    btn.TextSize = 13
+    btn.TextColor3 = ZHub.Theme.Text
+    btn.Text = text
+    btn.Parent = page
+    local bc = track(Instance.new("UICorner"))
+    bc.CornerRadius = UDim.new(0, 6)
+    bc.Parent = btn
+
+    btn.MouseEnter:Connect(function() btn.BackgroundColor3 = ZHub.Theme.ElementHover end)
+    btn.MouseLeave:Connect(function() btn.BackgroundColor3 = ZHub.Theme.Element end)
+    btn.MouseButton1Click:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.1), {BackgroundColor3 = ZHub.Theme.Accent}):Play()
+        task.wait(0.12)
+        TweenService:Create(btn, TweenInfo.new(0.2), {BackgroundColor3 = ZHub.Theme.Element}):Play()
+        if callback then callback() end
+    end)
+end
+
+-- Element: Dropdown (player list)
+local function makeDropdown(page, text, options, callback)
+    local holder = track(Instance.new("Frame"))
+    holder.Size = UDim2.new(1, 0, 0, 34)
+    holder.BackgroundColor3 = ZHub.Theme.Element
+    holder.BorderSizePixel = 0
+    holder.Parent = page
+    local hc = track(Instance.new("UICorner"))
+    hc.CornerRadius = UDim.new(0, 6)
+    hc.Parent = holder
+
+    local lbl = track(Instance.new("TextLabel"))
+    lbl.Size = UDim2.new(0.5, 0, 1, 0)
+    lbl.Position = UDim2.new(0, 12, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextSize = 13
+    lbl.TextColor3 = ZHub.Theme.Text
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Text = text
+    lbl.Parent = holder
+
+    local val = track(Instance.new("TextLabel"))
+    val.Size = UDim2.new(0.5, -12, 1, 0)
+    val.Position = UDim2.new(0.5, 0, 0, 0)
+    val.BackgroundTransparency = 1
+    val.Font = Enum.Font.GothamBold
+    val.TextSize = 13
+    val.TextColor3 = ZHub.Theme.Accent
+    val.TextXAlignment = Enum.TextXAlignment.Right
+    val.Text = options[1] or "—"
+    val.Parent = holder
+
+    local ddBtn = track(Instance.new("TextButton"))
+    ddBtn.Size = UDim2.new(1, 0, 1, 0)
+    ddBtn.BackgroundTransparency = 1
+    ddBtn.Text = ""
+    ddBtn.Parent = holder
+
+    local list = track(Instance.new("Frame"))
+    list.Size = UDim2.new(1, 0, 0, #options * 26)
+    list.Position = UDim2.new(0, 0, 1, 4)
+    list.BackgroundColor3 = ZHub.Theme.ElementHover
+    list.Visible = false
+    list.ZIndex = 5
+    list.Parent = holder
+    local lc = track(Instance.new("UICorner"))
+    lc.CornerRadius = UDim.new(0, 6)
+    lc.Parent = list
+
+    local ll = track(Instance.new("UIListLayout"))
+    ll.Parent = list
+    ll.Padding = UDim.new(0, 1)
+
+    local function refresh(newOptions)
+        for _, c in ipairs(list:GetChildren()) do
+            if c:IsA("TextButton") then c:Destroy() end
+        end
+        for _, opt in ipairs(newOptions) do
+            local b = Instance.new("TextButton")
+            b.Size = UDim2.new(1, 0, 0, 25)
+            b.BackgroundColor3 = ZHub.Theme.ElementHover
+            b.BackgroundTransparency = 0
+            b.Text = "  " .. opt
+            b.Font = Enum.Font.Gotham
+            b.TextSize = 12
+            b.TextColor3 = ZHub.Theme.Text
+            b.TextXAlignment = Enum.TextXAlignment.Left
+            b.ZIndex = 6
+            b.Parent = list
+            b.MouseButton1Click:Connect(function()
+                val.Text = opt
+                list.Visible = false
+                if callback then callback(opt) end
+            end)
+        end
+        list.Size = UDim2.new(1, 0, 0, #newOptions * 26)
+    end
+
+    refresh(options)
+
+    ddBtn.MouseButton1Click:Connect(function()
+        list.Visible = not list.Visible
+    end)
+
+    return {
+        Refresh = refresh,
+        Set = function(opt) val.Text = opt; if callback then callback(opt) end end,
+        Get = function() return val.Text end,
+    }
+end
+
+-- ============================================================
+-- BUILD UI
+-- ============================================================
+local UI = UILib.new("Z HUB")
+
+-- ===== TAB: PLAYER =====
+local playerTab = UI:AddTab("Player")
+makeSectionLabel(playerTab.page, "Movement")
+makeSlider(playerTab.page, "WalkSpeed", 16, 200, 16, function(v)
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChild("Humanoid") then
+        char.Humanoid.WalkSpeed = v
+    end
+end)
+makeSlider(playerTab.page, "JumpPower", 50, 300, 50, function(v)
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChildOfClass("Humanoid") then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        hum.UseJumpPower = true
+        hum.JumpPower = v
+        hum.JumpHeight = v / 50
+    end
+end)
+
+local flyToggle, flySpeed
+local flyConn, flyBP, flyBG
+local function startFly(speed)
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not root or not hum then return end
+
+    if flyBP then flyBP:Destroy() end
+    if flyBG then flyBG:Destroy() end
+    flyBP = Instance.new("BodyPosition")
+    flyBP.Position = root.Position
+    flyBP.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+    flyBP.Parent = root
+
+    flyBG = Instance.new("BodyGyro")
+    flyBG.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+    flyBG.P = 1e5
+    flyBG.CFrame = root.CFrame
+    flyBG.Parent = root
+
+    if flyConn then flyConn:Disconnect() end
+    flyConn = RunService.RenderStepped:Connect(function()
+        if not ZHub.Flags["Fly"] then return end
+        local cam = Workspace.CurrentCamera
+        local dir = Vector3.zero
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cam.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0,1,0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.new(0,1,0) end
+        if dir.Magnitude > 0 then dir = dir.Unit end
+        flyBP.Position = root.Position + dir * speed
+        flyBG.CFrame = cam.CFrame
+    end)
+end
+local function stopFly()
+    if flyConn then flyConn:Disconnect(); flyConn = nil end
+    if flyBP then flyBP:Destroy(); flyBP = nil end
+    if flyBG then flyBG:Destroy(); flyBG = nil end
+end
+
+flyToggle = makeToggle(playerTab.page, "Fly", false, function(state)
+    if state then startFly(ZHub.Flags["Fly Speed"] or 50)
+    else stopFly() end
+end)
+flySpeed = makeSlider(playerTab.page, "Fly Speed", 10, 300, 50, function(v)
+    if ZHub.Flags["Fly"] then stopFly(); startFly(v) end
+end)
+
+local noclipConn
+makeToggle(playerTab.page, "Noclip", false, function(state)
+    if state then
+        if noclipConn then noclipConn:Disconnect() end
+        noclipConn = RunService.Stepped:Connect(function()
+            local char = LocalPlayer.Character
+            if char then
+                for _, p in ipairs(char:GetDescendants()) do
+                    if p:IsA("BasePart") and p.CanCollide then
+                        p.CanCollide = false
+                    end
+                end
+            end
+        end)
+        table.insert(ZHub.Connections, noclipConn)
+    else
+        if noclipConn then noclipConn:Disconnect(); noclipConn = nil end
+    end
+end)
+
+makeToggle(playerTab.page, "Infinite Jump", false, function(state)
+    ZHub.Flags["Infinite Jump"] = state
+end)
+connect(UserInputService.JumpRequest, function()
+    if ZHub.Flags["Infinite Jump"] then
+        local char = LocalPlayer.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+    end
+end)
+
+makeToggle(playerTab.page, "God Mode", false, function(state)
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    if state then
+        hum.BreakJointsOnDeath = false
+        local oldMax = hum.MaxHealth
+        hum.MaxHealth = math.huge
+        hum.Health = math.huge
+    else
+        hum.MaxHealth = 100
+        hum.Health = 100
+    end
+end)
+
+makeSectionLabel(playerTab.page, "Actions")
+makeButton(playerTab.page, "Reset Character", function()
+    local char = LocalPlayer.Character
+    if char then char:BreakJoints() end
+end)
+makeButton(playerTab.page, "Respawn", function()
+    LocalPlayer:LoadCharacter()
+end)
+
+-- apply speed/jump when character respawns
+LocalPlayer.CharacterAdded:Connect(function(char)
+    task.wait(0.2)
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.WalkSpeed = ZHub.Flags["WalkSpeed"] or 16
+        if ZHub.Flags["JumpPower"] then
+            hum.UseJumpPower = true
+            hum.JumpPower = ZHub.Flags["JumpPower"]
+        end
+    end
+end)
+
+-- ===== TAB: VISUALS (ESP) =====
+local visTab = UI:AddTab("Visuals")
+makeSectionLabel(visTab.page, "ESP Settings")
+local espOptions = { Enabled = false, Boxes = true, Names = true, Distance = true, TeamCheck = true }
+local espDrawings = {}
+
+local function clearESP()
+    for _, d in pairs(espDrawings) do
+        for _, inst in ipairs(d) do pcall(function() inst:Remove() end) end
+    end
+    espDrawings = {}
+end
+
+local function makeBoxFor(plr)
+    local drawings = {}
+    local box = Drawing.new("Quad")
+    box.Thickness = 1.5
+    box.Color = ZHub.Theme.Accent
+    box.Filled = false
+    box.Visible = false
+    table.insert(drawings, box)
+
+    local name = Drawing.new("Text")
+    name.Size = 13
+    name.Color = ZHub.Theme.Text
+    name.Center = true
+    name.Outline = true
+    name.Visible = false
+    table.insert(drawings, name)
+
+    local dist = Drawing.new("Text")
+    dist.Size = 12
+    dist.Color = ZHub.Theme.SubText
+    dist.Center = true
+    dist.Outline = true
+    dist.Visible = false
+    table.insert(drawings, dist)
+
+    espDrawings[plr] = drawings
+end
+
+local function updateESP()
+    if not Drawing or not espOptions.Enabled then clearESP(); return end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            if not espDrawings[plr] then makeBoxFor(plr) end
+            local char = plr.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local drawings = espDrawings[plr]
+            if not root or not hum or hum.Health <= 0 then
+                for _, d in ipairs(drawings) do d.Visible = false end
+            else
+                -- team check
+                local sameTeam = false
+                if espOptions.TeamCheck and LocalPlayer.Team and plr.Team then
+                    sameTeam = LocalPlayer.Team == plr.Team
+                end
+                if sameTeam then
+                    for _, d in ipairs(drawings) do d.Visible = false end
+                else
+                    local cam = Workspace.CurrentCamera
+                    local pos2D, onScreen = cam:WorldToViewportPoint(root.Position)
+                    if onScreen then
+                        local headPos = cam:WorldToViewportPoint(root.Position + Vector3.new(0, 3, 0))
+                        local legPos = cam:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
+                        local h = math.abs(headPos.Y - legPos.Y)
+                        local w = h / 2
+                        local cx, cy = pos2D.X, pos2D.Y
+                        drawings[1].PointA = Vector2.new(cx - w/2, cy - h/2)
+                        drawings[1].PointB = Vector2.new(cx + w/2, cy - h/2)
+                        drawings[1].PointC = Vector2.new(cx + w/2, cy + h/2)
+                        drawings[1].PointD = Vector2.new(cx - w/2, cy + h/2)
+                        drawings[1].Visible = espOptions.Boxes
+                        drawings[2].Position = Vector2.new(cx, cy - h/2 - 14)
+                        drawings[2].Text = plr.DisplayName .. " (@" .. plr.Name .. ")"
+                        drawings[2].Visible = espOptions.Names
+                        local lp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        local dVal = lp and math.floor((lp.Position - root.Position).Magnitude) or 0
+                        drawings[3].Position = Vector2.new(cx, cy + h/2 + 4)
+                        drawings[3].Text = tostring(dVal) .. " studs"
+                        drawings[3].Visible = espOptions.Distance
+                    else
+                        for _, d in ipairs(drawings) do d.Visible = false end
+                    end
+                end
+            end
+        end
+    end
+end
+
+makeToggle(visTab.page, "ESP Enabled", false, function(state)
+    if state and not Drawing then
+        notify("ESP", "Executor không hỗ trợ Drawing API")
+        return false
+    end
+    espOptions.Enabled = state
+    if not state then clearESP() end
+end)
+makeToggle(visTab.page, "ESP Boxes", true, function(state) espOptions.Boxes = state end)
+makeToggle(visTab.page, "ESP Names", true, function(state) espOptions.Names = state end)
+makeToggle(visTab.page, "ESP Distance", true, function(state) espOptions.Distance = state end)
+makeToggle(visTab.page, "Team Check", true, function(state) espOptions.TeamCheck = state end)
+
+makeSectionLabel(visTab.page, "World")
+makeToggle(visTab.page, "Fullbright", false, function(state)
+    if state then
+        Lighting.Brightness = 2
+        Lighting.ClockTime = 14
+        Lighting.FogEnd = 1e6
+        Lighting.GlobalShadows = false
+        Lighting.Ambient = Color3.fromRGB(178, 178, 178)
+    else
+        Lighting.Brightness = 1
+        Lighting.ClockTime = 12
+        Lighting.GlobalShadows = true
+        Lighting.Ambient = Color3.fromRGB(0, 0, 0)
+    end
+end)
+makeSlider(visTab.page, "FOV", 50, 120, 70, function(v)
+    pcall(function() Workspace.CurrentCamera.FieldOfView = v end)
+end)
+
+connect(RunService.RenderStepped, updateESP)
+Players.PlayerRemoving:Connect(function(p)
+    if espDrawings[p] then
+        for _, d in ipairs(espDrawings[p]) do pcall(function() d:Remove() end) end
+        espDrawings[p] = nil
+    end
+end)
+
+-- ===== TAB: TELEPORT =====
+local tpTab = UI:AddTab("Teleport")
+makeSectionLabel(tpTab.page, "Player Teleport")
+
+local playerDropdown = makeDropdown(tpTab.page, "Target", {"Loading..."}, function(name)
+    ZHub.Flags["TpTarget"] = name
+end)
+
+local function refreshPlayerList()
+    local list = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then table.insert(list, p.Name) end
+    end
+    if #list == 0 then table.insert(list, "No players") end
+    playerDropdown.Refresh(list)
+end
+task.spawn(function()
+    while true do
+        refreshPlayerList()
+        task.wait(2)
+    end
+end)
+
+makeButton(tpTab.page, "Teleport to Player", function()
+    local target = ZHub.Flags["TpTarget"]
+    if not target then return notify("TP", "Chọn player trước") end
+    local plr = Players:FindFirstChild(target)
+    if plr and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+        local me = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if me then me.CFrame = plr.Character.HumanoidRootPart.CFrame + Vector3.new(0, 3, 0) end
+    end
+end)
+makeButton(tpTab.page, "Teleport to Random Player", function()
+    local all = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            table.insert(all, p)
+        end
+    end
+    if #all > 0 then
+        local target = all[math.random(#all)]
+        local me = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if me then me.CFrame = target.Character.HumanoidRootPart.CFrame + Vector3.new(0, 3, 0) end
+    end
+end)
+
+makeSectionLabel(tpTab.page, "Click TP")
+local clickTP = false
+makeToggle(tpTab.page, "Click Teleport (Ctrl+Click)", false, function(state) clickTP = state end)
+connect(UserInputService.InputBegan, function(input, gp)
+    if gp then return end
+    if clickTP and input.UserInputType == Enum.UserInputType.MouseButton1
+       and UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
+        local mouse = LocalPlayer:GetMouse()
+        local me = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if me and mouse.Hit then
+            me.CFrame = CFrame.new(mouse.Hit.Position + Vector3.new(0, 3, 0))
+        end
+    end
+end)
+
+makeSectionLabel(tpTab.page, "Saved Positions")
+local savedPos = {}
+makeButton(tpTab.page, "Save Current Position", function()
+    local me = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if me then
+        table.insert(savedPos, me.CFrame)
+        notify("Position", "Đã lưu vị trí #" .. #savedPos)
+    end
+end)
+makeButton(tpTab.page, "Teleport to Last Saved", function()
+    if #savedPos == 0 then return notify("Position", "Chưa có vị trí nào") end
+    local me = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if me then me.CFrame = savedPos[#savedPos] end
+end)
+
+-- ===== TAB: MISC =====
+local miscTab = UI:AddTab("Misc")
+makeSectionLabel(miscTab.page, "Utilities")
+makeToggle(miscTab.page, "Anti AFK", false, function(state)
+    ZHub.Flags["AntiAFK"] = state
+end)
+local antiAfkConn
+local function setupAntiAFK()
+    if antiAfkConn then antiAfkConn:Disconnect() end
+    antiAfkConn = LocalPlayer.Idled:Connect(function()
+        if ZHub.Flags["AntiAFK"] then
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+            notify("Anti AFK", "Đã tự động chống AFK")
+        end
+    end)
+end
+setupAntiAFK()
+
+makeButton(miscTab.page, "Server Hop", function()
+    notify("Server Hop", "Đang tìm server mới...")
+    pcall(function()
+        local req = request or syn.request or http_request
+        if not req then return notify("Server Hop", "Executor không hỗ trợ HTTP request") end
+        local res = req({
+            Url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100",
+            Method = "GET",
+        })
+        local body = HttpService:JSONDecode(res.Body)
+        local candidates = {}
+        for _, s in ipairs(body.data) do
+            if s.playing < s.maxPlayers and s.id ~= game.JobId then
+                table.insert(candidates, s.id)
+            end
+        end
+        if #candidates > 0 then
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, candidates[math.random(#candidates)], LocalPlayer)
+        else
+            notify("Server Hop", "Không tìm thấy server phù hợp")
+        end
+    end)
+end)
+
+makeButton(miscTab.page, "Rejoin Server", function()
+    TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+end)
+
+makeButton(miscTab.page, "Copy Job ID", function()
+    if setclipboard then
+        setclipboard(game.JobId)
+        notify("Job ID", "Đã copy vào clipboard")
+    else
+        notify("Job ID", "Executor không hỗ trợ setclipboard")
+    end
+end)
+
+makeSectionLabel(miscTab.page, "Performance")
+makeButton(miscTab.page, "FPS Boost", function()
+    pcall(function()
+        for _, v in ipairs(Workspace:GetDescendants()) do
+            if v:IsA("BasePart") then
+                v.Material = Enum.Material.SmoothPlastic
+                v.Reflectance = 0
+            elseif v:IsA("Decal") or v:IsA("Texture") then
+                v.Transparency = 1
+            elseif v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Beam") then
+                v.Enabled = false
+            end
+        end
+        Lighting.GlobalShadows = false
+        notify("FPS Boost", "Đã tối ưu đồ họa")
+    end)
+end)
+makeButton(miscTab.page, "Show FPS (console)", function()
+    local fps = Stats.WorkingPacketsReceivedPerSecond and 1 / RunService.Heartbeat:Wait() or 0
+    print(string.format("[ZHub] FPS estimate: %.1f", fps))
+    notify("FPS", "Đã in ra console (F9)")
+end)
+
+-- ===== TAB: SETTINGS =====
+local setTab = UI:AddTab("Settings")
+makeSectionLabel(setTab.page, "UI")
+makeSlider(setTab.page, "UI Toggle Key", 1, 30, 19, function() end)
+-- Right Shift = keycode 19, mapping for display only; actual bind handled below
+local uiVisible = true
+local toggleKey = Enum.KeyCode.RightShift
+ZHub.Flags["UIKey"] = "RightShift"
+connect(UserInputService.InputBegan, function(input, gp)
+    if gp then return end
+    if input.KeyCode == toggleKey then
+        uiVisible = not uiVisible
+        UI.main.Visible = uiVisible
+    end
+end)
+makeButton(setTab.page, "Hide / Show UI", function()
+    uiVisible = not uiVisible
+    UI.main.Visible = uiVisible
+end)
+
+makeSectionLabel(setTab.page, "Theme Color")
+local themeColorBtns = {
+    {name = "Purple",  color = Color3.fromRGB(120, 80, 230)},
+    {name = "Blue",    color = Color3.fromRGB(70, 130, 230)},
+    {name = "Red",     color = Color3.fromRGB(230, 70, 70)},
+    {name = "Green",   color = Color3.fromRGB(70, 200, 120)},
+    {name = "Pink",    color = Color3.fromRGB(230, 90, 180)},
+}
+for _, tc in ipairs(themeColorBtns) do
+    makeButton(setTab.page, "Theme: " .. tc.name, function()
+        ZHub.Theme.Accent = tc.color
+        -- re-apply: re-render notify stroke & existing elements won't change but new ones will
+        notify("Theme", "Đã đổi màu nhấn → " .. tc.name)
+    end)
+end
+
+makeSectionLabel(setTab.page, "Danger Zone")
+makeButton(setTab.page, "Unload Script", function()
+    notify("Z Hub", "Đang unload...")
+    task.wait(0.5)
+    for _, c in ipairs(ZHub.Connections) do pcall(function() c:Disconnect() end) end
+    stopFly()
+    clearESP()
+    for _, i in ipairs(ZHub.Instances) do pcall(function() i:Destroy() end) end
+    -- restore walkspeed
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChildOfClass("Humanoid") then
+        char:FindFirstChildOfClass("Humanoid").WalkSpeed = 16
+    end
+end)
+
+-- ============================================================
+-- INIT
+-- ============================================================
+notify("Z Hub", "Loaded successfully! Press RightShift để ẩn/hiện UI", 4)
+print("[Z Hub] Loaded. Tab: Player | Visuals | Teleport | Misc | Settings")
+
+return ZHub
